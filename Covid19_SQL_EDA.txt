@@ -76,7 +76,7 @@ Join Portfolio..covid_vaccinations vac
 where dea.continent is not null 
 order by 2,3;
 
--- Using CTE to perform Calculation on Partition By in previous query
+-- Using CTE and window funtion to perform Calculation on Partition By in previous query
 
 With PopvsVac (continent, location, date, population, new_vaccinations, RollingPeopleVaccinated)
 as
