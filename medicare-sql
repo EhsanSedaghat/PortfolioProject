@@ -1,0 +1,138 @@
+-- SQL - MEDICARE DATA 
+
+-- Total number of medications prescribed in each state
+SELECT 
+    nppes_provider_state, 
+    SUM(total_claim_count) AS total_meds
+FROM 
+    `bigquery-public-data.medicare.part_d_prescriber_2014`
+GROUP BY 
+    nppes_provider_state
+ORDER BY 
+    total_meds desc;
+
+-- Most prescribed medication in each state
+
+SELECT 
+    A.state,
+    drug_name,
+    max_total
+FROM (
+    SELECT 
+        drug_name,
+        nppes_provider_state AS state,
+        SUM(total_claim_count) AS total,
+    FROM 
+        `bigquery-public-data.medicare.part_d_prescriber_2014`
+    GROUP BY
+        drug_name, state
+) AS A 
+INNER JOIN (
+    SELECT 
+        state,
+        MAX(total) as max_total
+    FROM (
+    SELECT 
+        nppes_provider_state AS state,
+        SUM(total_claim_count) AS total,
+    FROM 
+        `bigquery-public-data.medicare.part_d_prescriber_2014`
+    GROUP BY
+        drug_name, state
+)
+    GROUP BY 
+        state
+) AS B 
+ON 
+    A.state = B.state AND 
+    A.total = B.max_total
+GROUP BY
+    A.state, drug_name, max_total
+ORDER BY A.state;
+
+-- Average cost for inpatient and outpatient treatment in each city and state
+
+SELECT 
+    A.provider_city,
+    A.provider_state,
+    A.avg_cost_inpatient,
+    B.avg_cost_outpatient
+FROM  
+    (SELECT 
+        provider_city,
+        provider_state,
+        ROUND(SUM(average_medicare_payments*total_discharges)/SUM(total_discharges),
+        2) AS avg_cost_inpatient
+    FROM 
+        `bigquery-public-data.medicare.inpatient_charges_2014`
+    GROUP BY 
+        provider_state, provider_city) AS A
+JOIN
+    (SELECT 
+        provider_city,
+        provider_state,
+        ROUND(SUM(average_total_payments*outpatient_services)/SUM(outpatient_services),
+        2) AS avg_cost_outpatient
+    FROM 
+        `bigquery-public-data.medicare.outpatient_charges_2014`
+    GROUP BY 
+        provider_state, provider_city) AS B
+ON 
+    A.provider_city = B.provider_city AND 
+    A.provider_state = B.provider_state;
+
+-- most common inpatient diagnostic conditions in the U.S
+
+SELECT 
+    drg_definition,
+    COUNT(drg_definition) as total_conditions
+FROM 
+    `bigquery-public-data.medicare.inpatient_charges_2014`
+GROUP BY
+    drg_definition
+ORDER BY
+    total_conditions desc
+LIMIT 5;
+-- Top 3 rank cities with the most diagnostic conditions in the U.S and comparing their average cost national
+
+SELECT 
+    diagnostic_condition,
+    city,
+    state,
+    city_rank,
+    CAST(city_avg_total_payments AS INT) AS city_avg_payments,
+    CONCAT(ROUND(city_avg_total_payments/(national_sum_total_payments/national_num_cases)*100,0), " %") AS city_vs_national_payments
+FROM 
+(
+SELECT 
+    diagnostic_condition,
+    city,
+    state,
+    city_sum_total_payments,
+    city_avg_total_payments,
+    RANK() OVER(PARTITION BY diagnostic_condition ORDER BY city_num_cases DESC) AS city_rank,
+    SUM(city_num_cases) OVER(PARTITION BY diagnostic_condition) AS national_num_cases,
+    ROUND(SUM(city_sum_total_payments) OVER(PARTITION BY diagnostic_condition),2) AS national_sum_total_payments
+FROM 
+(
+    SELECT 
+        drg_definition AS diagnostic_condition,
+        provider_city AS city,
+        provider_state AS state,
+        SUM(total_discharges) AS city_num_cases,
+        ROUND(SUM(average_total_payments * total_discharges)/SUM(total_discharges),
+        2) AS city_avg_total_payments,
+        SUM(average_total_payments * total_discharges) AS city_sum_total_payments
+    FROM 
+        `bigquery-public-data.medicare.inpatient_charges_2014`
+    GROUP BY 
+        diagnostic_condition,
+        city,
+        state
+    ))
+    WHERE 
+        city_rank <= 3
+    ORDER BY 
+        national_num_cases DESC,
+        city_rank
+    LIMIT 9;
